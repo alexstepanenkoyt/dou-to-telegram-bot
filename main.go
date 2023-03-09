@@ -1,11 +1,14 @@
 package main
 
 import (
-	"encoding/json"
 	"net/http"
 )
 
 func main() {
+	//keeping alive on replit
+	http.HandleFunc("/", handle)
+	go http.ListenAndServe(":0", nil)
+
 	storage, err := CreateMongoStorage()
 	if err != nil {
 		panic(err)
@@ -18,9 +21,6 @@ func main() {
 
 	bot := CreateTelegramBot(storage, worker)
 	bot.Run()
-
-	http.HandleFunc("/", handle)
-	http.ListenAndServe(":0", nil)
 }
 
 func handle(w http.ResponseWriter, r *http.Request) {
@@ -28,9 +28,4 @@ func handle(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte("Success"))
 	return
-}
-func writeJSON(w http.ResponseWriter, status int, v any) error {
-	w.Header().Add("Content-Type", "application/json")
-	w.WriteHeader(status)
-	return json.NewEncoder(w).Encode(v)
 }
