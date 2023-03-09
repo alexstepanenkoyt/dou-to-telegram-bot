@@ -24,7 +24,7 @@ type bot struct {
 	echotron.API
 }
 
-const token = os.Getenv("TG")
+var token = os.Getenv("TG")
 
 var dsp *echotron.Dispatcher
 var parseModeHTML = &echotron.MessageOptions{ParseMode: echotron.HTML}
