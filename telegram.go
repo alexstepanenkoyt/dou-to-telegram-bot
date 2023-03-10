@@ -3,8 +3,10 @@ package main
 import (
 	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/NicoNex/echotron/v3"
@@ -22,6 +24,7 @@ type bot struct {
 	chatID      int64
 	state       stateFn
 	messagesIds []int
+	lock        *sync.RWMutex
 	echotron.API
 }
 
@@ -52,6 +55,7 @@ func newBot(chatID int64) echotron.Bot {
 	bot := &bot{
 		chatID: chatID,
 		API:    echotron.NewAPI(token),
+		lock:   &sync.RWMutex{},
 	}
 	bot.state = bot.handleMessage
 	go bot.selfDestruct(time.After(10 * time.Minute))
@@ -70,16 +74,25 @@ func newBotBroadcast(chatID int64) echotron.Bot {
 
 func (b *bot) selfDestruct(timech <-chan time.Time) {
 	<-timech
-	for _, msgId := range b.messagesIds {
-		res, err := b.DeleteMessage(b.chatID, msgId)
-		fmt.Printf("%+v\n%s", res.Ok, err)
-	}
+	b.RemoveMessages()
 	dsp.DelSession(b.chatID)
 }
 
 func (b *bot) Update(update *echotron.Update) {
+	b.messagesIds = append(b.messagesIds, update.Message.ID)
+	b.SendChatAction(echotron.Typing, b.chatID, nil)
 	b.state = b.state(update)
-	b.DeleteMessage(b.chatID, update.Message.ID)
+}
+
+func (b *bot) RemoveMessages() {
+	toKeep := []int{}
+	for i := 0; i < len(b.messagesIds); i++ {
+		res, err := b.DeleteMessage(b.chatID, b.messagesIds[i])
+		if err != nil && res.ErrorCode != http.StatusBadRequest {
+			toKeep = append(toKeep, b.messagesIds[i])
+		}
+	}
+	b.messagesIds = toKeep
 }
 
 func (b *bot) handleMessage(update *echotron.Update) stateFn {
@@ -246,6 +259,9 @@ func (b *bot) findCategory(name string) (DouCategory, error) {
 }
 
 func (b *bot) SendAutoDeleteMessage(text string, chatID int64, opts *echotron.MessageOptions) {
+	b.lock.Lock()
+	defer b.lock.Unlock()
+	b.RemoveMessages()
 	res, err := b.SendMessage(text, chatID, opts)
 	if err != nil {
 		fmt.Println(err)
