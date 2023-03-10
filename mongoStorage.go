@@ -95,6 +95,7 @@ func (ms *MongoStorage) SubscribeUser(category DouCategory, userId int, chatId i
 	if res.UserId == 0 {
 		fmt.Println("User doesn't exist, creating...")
 		res.UserId = userId
+		res.CreateDate = time.Now().UTC().Format(time.RFC1123Z)
 		res.Subscriptions = []SubscriptionCategory{subCategory}
 		if _, err := coll.InsertOne(context.TODO(), res); err != nil {
 			return false, err

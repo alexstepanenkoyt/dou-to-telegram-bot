@@ -27,5 +27,6 @@ type SubscriptionInfo struct {
 	UserId        int                    `bson:"userId,omitempty"`
 	ChatId        int64                  `bson:"chatId,omitempty"`
 	UserName      string                 `bson:"userName,omitempty"`
+	CreateDate    string                 `bson:"createDate,omitempty"`
 	Subscriptions []SubscriptionCategory `bson:"subscriptions,omitempty"`
 }
