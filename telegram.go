@@ -25,6 +25,8 @@ type bot struct {
 	state       stateFn
 	messagesIds []int
 	lock        *sync.RWMutex
+	spamLock    *sync.RWMutex
+	spamData    []int64
 	echotron.API
 }
 
@@ -53,9 +55,11 @@ func (tb *TelegramBot) Run() {
 
 func newBot(chatID int64) echotron.Bot {
 	bot := &bot{
-		chatID: chatID,
-		API:    echotron.NewAPI(token),
-		lock:   &sync.RWMutex{},
+		chatID:   chatID,
+		API:      echotron.NewAPI(token),
+		lock:     &sync.RWMutex{},
+		spamLock: &sync.RWMutex{},
+		spamData: make([]int64, 3),
 	}
 	bot.state = bot.handleMessage
 	go bot.selfDestruct(time.After(10 * time.Minute))
@@ -72,6 +76,26 @@ func newBotBroadcast(chatID int64) echotron.Bot {
 	return bot
 }
 
+func (b *bot) CheckForSpam() bool {
+	msgTime := time.Now().UnixMilli()
+	b.spamLock.Lock()
+	defer b.spamLock.Unlock()
+
+	b.spamData[0] = msgTime
+
+	var timeBetweenMessages int64 = 0
+	for i := 0; i < len(b.spamData)-1; i++ {
+		timeBetweenMessages += b.spamData[i] - b.spamData[i+1]
+	}
+
+	for i := len(b.spamData) - 2; i >= 0; i-- {
+		b.spamData[i+1] = b.spamData[i]
+		b.spamData[i] = 0
+	}
+
+	return int(timeBetweenMessages) < len(b.spamData)*700
+}
+
 func (b *bot) selfDestruct(timech <-chan time.Time) {
 	<-timech
 	b.RemoveMessages()
@@ -81,6 +105,12 @@ func (b *bot) selfDestruct(timech <-chan time.Time) {
 func (b *bot) Update(update *echotron.Update) {
 	go b.AddLastMessageToDeleteList(update)
 	b.SendChatAction(echotron.Typing, b.chatID, nil)
+	if spam := b.CheckForSpam(); spam {
+		b.SendAutoDeleteMessage("не спамь будь ласка😉", b.chatID, parseModeHTML)
+		b.state = b.handleMessage
+		return
+	}
+
 	b.state = b.state(update)
 }
 

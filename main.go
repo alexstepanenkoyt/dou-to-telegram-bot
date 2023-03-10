@@ -27,5 +27,4 @@ func handle(w http.ResponseWriter, r *http.Request) {
 	w.Header().Add("Content-Type", "application/text")
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte("Success"))
-	return
 }
