@@ -56,6 +56,7 @@ func (b *bot) selfDestruct(timech <-chan time.Time) {
 
 func (b *bot) Update(update *echotron.Update) {
 	b.state = b.state(update)
+	b.DeleteMessage(b.chatID, update.Message.ID)
 }
 
 func (b *bot) handleMessage(update *echotron.Update) stateFn {
