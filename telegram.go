@@ -79,9 +79,15 @@ func (b *bot) selfDestruct(timech <-chan time.Time) {
 }
 
 func (b *bot) Update(update *echotron.Update) {
-	b.messagesIds = append(b.messagesIds, update.Message.ID)
+	go b.AddLastMessageToDeleteList(update)
 	b.SendChatAction(echotron.Typing, b.chatID, nil)
 	b.state = b.state(update)
+}
+
+func (b *bot) AddLastMessageToDeleteList(update *echotron.Update) {
+	b.lock.Lock()
+	defer b.lock.Unlock()
+	b.messagesIds = append(b.messagesIds, update.Message.ID)
 }
 
 func (b *bot) RemoveMessages() {
