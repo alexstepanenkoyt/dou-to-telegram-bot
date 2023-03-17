@@ -177,7 +177,7 @@ func (b *bot) handleMySubcriptions(update *echotron.Update) stateFn {
 		for v, filter := range b.telegramBot.douWorker.experienceFilters {
 			if DBIdToId(subCat.Experience) == filter {
 				s := fmt.Sprintf("%s(%s)", subCat.NameCategory, v)
-				subs = append(subs, s)
+				subs = append(subs, formatString(s))
 			}
 		}
 	}
@@ -230,9 +230,17 @@ func (b *bot) handleCategoryExperience(update *echotron.Update) stateFn {
 		return b.handleMessage
 	}
 
-	b.SendAutoDeleteMessage(fmt.Sprintf("✅ Ви вдало підписалися на <b>%s(%s)</b>, щойно з'явиться нова вакансія - я одразу вас сповіщу👍", b.category.name, update.Message.Text),
-		b.chatID, parseModeHTML)
+	b.SendAutoDeleteMessage(fmt.Sprintf("✅ Ви вдало підписалися на <b>%s(%s)</b>, щойно з'явиться нова вакансія - я одразу вас сповіщу👍", b.category.name,
+		formatString(update.Message.Text)), b.chatID, parseModeHTML)
+
 	return b.handleMessage
+}
+
+func formatString(msg string) string {
+	msg = strings.Replace(msg, "<", "&lt;", -1)
+	msg = strings.Replace(msg, ">", "&gt;", -1)
+
+	return msg
 }
 
 func (b *bot) handleSubscribeForCategory(update *echotron.Update) stateFn {
