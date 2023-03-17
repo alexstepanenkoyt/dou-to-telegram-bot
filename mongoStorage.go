@@ -36,7 +36,7 @@ func CreateMongoStorage() (*MongoStorage, error) {
 func (ms *MongoStorage) GetAllSubscribers(categoryName string, categoryId string, exp string) ([]SubscriptionInfo, error) {
 	coll := ms.subscriptionsCollection
 	//filter := bson.D{{Key: "subscriptions.idCategory", Value: GetId(categoryId)}}
-	filter := bson.M{"subscriptions": bson.D{{"idCategory", GetId(categoryId)}, {"nameCategory", categoryName}, {"experience", GetId(exp)}}}
+	filter := bson.M{"subscriptions": bson.D{{"idCategory", IdToDBId(categoryId)}, {"nameCategory", categoryName}, {"experience", IdToDBId(exp)}}}
 	fmt.Println(filter)
 	res := []SubscriptionInfo{}
 	cursor, err := coll.Find(context.TODO(), filter)
@@ -89,7 +89,7 @@ func (ms *MongoStorage) UnsubscribeUser(categoryName string, userId int) (bool, 
 func (ms *MongoStorage) SubscribeUser(category DouCategory, exp string, userId int, chatId int64, userName string) (bool, error) {
 	coll := ms.subscriptionsCollection
 	filter := bson.D{{Key: "userId", Value: userId}}
-	subCategory := SubscriptionCategory{IDCategory: GetId(category.id), NameCategory: category.name, Experience: GetId(exp)}
+	subCategory := SubscriptionCategory{IDCategory: IdToDBId(category.id), NameCategory: category.name, Experience: IdToDBId(exp)}
 	var res SubscriptionInfo
 	coll.FindOne(context.TODO(), filter).Decode(&res)
 	res.ChatId = chatId
@@ -107,7 +107,7 @@ func (ms *MongoStorage) SubscribeUser(category DouCategory, exp string, userId i
 	}
 
 	for _, alreadySubCat := range res.Subscriptions {
-		if alreadySubCat.IDCategory == GetId(category.id) {
+		if alreadySubCat.IDCategory == IdToDBId(category.id) {
 			return false, nil
 		}
 	}
@@ -123,13 +123,13 @@ func (ms *MongoStorage) SubscribeUser(category DouCategory, exp string, userId i
 func (ms *MongoStorage) SetLastTimeCheckedUTC(category DouCategory, exp string) error {
 	coll := ms.categoriesCollection
 	c := &CategoryInfo{
-		IDCategory:      GetId(category.id),
+		IDCategory:      IdToDBId(category.id),
 		NameCategory:    category.name,
-		Experience:      GetId(exp),
+		Experience:      IdToDBId(exp),
 		LastTimeChecked: time.Now().UTC().Format(time.RFC1123Z),
 	}
 
-	filter := bson.D{{Key: "idCategory", Value: c.IDCategory}, {Key: "experience", Value: GetId(exp)}}
+	filter := bson.D{{Key: "idCategory", Value: c.IDCategory}, {Key: "experience", Value: IdToDBId(exp)}}
 	result, err := coll.ReplaceOne(context.TODO(), filter, c)
 	if err != nil {
 		fmt.Println(err)
@@ -141,7 +141,7 @@ func (ms *MongoStorage) SetLastTimeCheckedUTC(category DouCategory, exp string) 
 		if err != nil {
 			return err
 		}
-		fmt.Printf("Added category %v exp[%s] with id: %v\n", category.name, GetId(exp), res.InsertedID)
+		fmt.Printf("Added category %v exp[%s] with id: %v\n", category.name, IdToDBId(exp), res.InsertedID)
 		return nil
 	}
 	fmt.Printf("Replaced lastTimeUsed for category `%v` matches: %v\n", category.name, result.MatchedCount)
@@ -150,12 +150,12 @@ func (ms *MongoStorage) SetLastTimeCheckedUTC(category DouCategory, exp string) 
 }
 func (ms *MongoStorage) GetLastTimeCheckedUTC(category DouCategory, exp string) time.Time {
 	coll := ms.categoriesCollection
-	filter := bson.D{{Key: "idCategory", Value: GetId(category.id)}, {Key: "experience", Value: GetId(exp)}}
+	filter := bson.D{{Key: "idCategory", Value: IdToDBId(category.id)}, {Key: "experience", Value: IdToDBId(exp)}}
 
 	var doc CategoryInfo
 	result := coll.FindOne(context.TODO(), filter)
 	if err := result.Decode(&doc); err != nil {
-		fmt.Printf("Category %s:id[%s]:exp[%s] wasn't found, so using current time\n", category.name, category.id, GetId(exp))
+		fmt.Printf("Category %s:id[%s]:exp[%s] wasn't found, so using current time\n", category.name, category.id, IdToDBId(exp))
 		return time.Now().UTC()
 	}
 
@@ -164,17 +164,24 @@ func (ms *MongoStorage) GetLastTimeCheckedUTC(category DouCategory, exp string) 
 		fmt.Printf("Error parsing %s to time\n", doc.LastTimeChecked)
 		return time.Now().UTC()
 	}
-	tm.GoString()
-	return time.Date(2023, time.March, 17, 18, 0, 0, 0, time.Now().Location()).UTC() //tm //
+
+	return tm //time.Date(2023, time.March, 17, 18, 0, 0, 0, time.Now().Location()).UTC() //
 }
 
 func remove[T any](slice []T, s int) []T {
 	return append(slice[:s], slice[s+1:]...)
 }
 
-func GetId(id string) string {
+func IdToDBId(id string) string {
 	if id == "" {
 		return "all"
 	}
 	return id
+}
+
+func DBIdToId(dbId string) string {
+	if dbId == "all" {
+		return ""
+	}
+	return dbId
 }

@@ -26,7 +26,6 @@ type bot struct {
 	state       stateFn
 	messagesIds []int
 	lock        *sync.RWMutex
-	spamLock    *sync.RWMutex
 	spamData    []int64
 	echotron.API
 }
@@ -59,7 +58,6 @@ func newBot(chatID int64) echotron.Bot {
 		chatID:   chatID,
 		API:      echotron.NewAPI(token),
 		lock:     &sync.RWMutex{},
-		spamLock: &sync.RWMutex{},
 		spamData: make([]int64, 3),
 	}
 	bot.state = bot.handleMessage
@@ -77,11 +75,7 @@ func newBotBroadcast(chatID int64) echotron.Bot {
 	return bot
 }
 
-func (b *bot) CheckForSpam() bool {
-	msgTime := time.Now().UnixMilli()
-	b.spamLock.Lock()
-	defer b.spamLock.Unlock()
-
+func (b *bot) CheckForSpam(msgTime int64) bool {
 	b.spamData[0] = msgTime
 
 	var timeBetweenMessages int64 = 0
@@ -110,12 +104,16 @@ func (b *bot) selfDestruct(timech <-chan time.Time) {
 
 func (b *bot) Update(update *echotron.Update) {
 	if update == nil || update.Message == nil {
-		fmt.Println("ansync issue")
+		fmt.Println("destroy session sync issue")
 		return
 	}
 
+	msgTime := time.Now().UnixMilli()
+	b.lock.Lock()
+	defer b.lock.Unlock()
+
 	b.SendChatAction(echotron.Typing, b.chatID, nil)
-	if spam := b.CheckForSpam(); spam {
+	if spam := b.CheckForSpam(msgTime); spam {
 		b.SendAutoDeleteMessage("не спамь будь ласка😉", b.chatID, parseModeHTML)
 		b.AddLastMessageToDeleteList(update)
 		b.state = b.handleMessage
@@ -127,8 +125,6 @@ func (b *bot) Update(update *echotron.Update) {
 }
 
 func (b *bot) AddLastMessageToDeleteList(update *echotron.Update) {
-	b.lock.Lock()
-	defer b.lock.Unlock()
 	b.messagesIds = append(b.messagesIds, update.Message.ID)
 }
 
@@ -178,8 +174,12 @@ func (b *bot) handleMySubcriptions(update *echotron.Update) stateFn {
 
 	subs := []string{}
 	for _, subCat := range subInfo.Subscriptions {
-		s := fmt.Sprintf("%s(%s)", subCat.NameCategory, subCat.Experience)
-		subs = append(subs, s)
+		for v, filter := range b.telegramBot.douWorker.experienceFilters {
+			if DBIdToId(subCat.Experience) == filter {
+				s := fmt.Sprintf("%s(%s)", subCat.NameCategory, v)
+				subs = append(subs, s)
+			}
+		}
 	}
 
 	b.SendAutoDeleteMessage(fmt.Sprintf("✅ Ви підписані на: <b>%s</b>", strings.Join(subs, ", ")), b.chatID, parseModeHTML)
@@ -350,8 +350,6 @@ func (b *bot) findExperience(name string) (string, error) {
 }
 
 func (b *bot) SendAutoDeleteMessage(text string, chatID int64, opts *echotron.MessageOptions) {
-	b.lock.Lock()
-	defer b.lock.Unlock()
 	b.RemoveMessages()
 	res, err := b.SendMessage(text, chatID, opts)
 	if err != nil {
