@@ -12,6 +12,7 @@ import (
 type DouVacancy struct {
 	url          string
 	name         string
+	experience   string
 	categoryId   string
 	categoryName string
 }
@@ -23,9 +24,10 @@ type DouCategory struct {
 }
 
 type DouWorker struct {
-	storage        Storage
-	categories     []DouCategory
-	newVacancyChan chan DouVacancy
+	storage           Storage
+	categories        []DouCategory
+	experienceFilters map[string]string
+	newVacancyChan    chan DouVacancy
 }
 
 const (
@@ -48,6 +50,13 @@ func (dw *DouWorker) Run() error {
 	}
 
 	dw.categories = res
+	dw.experienceFilters = map[string]string{
+		"< 1 року":         "0-1",
+		"1…3 роки":         "1-3",
+		"3…5 років":        "3-5",
+		"5+ років":         "5plus",
+		"Будь-який досвід": "",
+	}
 	go scrapVacancies(dw)
 	return nil
 }
@@ -56,19 +65,20 @@ func scrapVacancies(dw *DouWorker) {
 	ticker := time.NewTicker(checkVacanciesInterval * time.Minute)
 	for {
 		for _, category := range dw.categories {
-			lastTimeChecked := dw.storage.GetLastTimeCheckedUTC(category)
-			if err := scrapCategory(dw, category, lastTimeChecked); err != nil {
-				fmt.Println(err)
-			} else {
-				time.Sleep(5 * time.Second)
+			for _, v := range dw.experienceFilters {
+				lastTimeChecked := dw.storage.GetLastTimeCheckedUTC(category, v)
+				if err := scrapCategory(dw, category, v, lastTimeChecked); err != nil {
+					fmt.Println(err)
+				} else {
+					time.Sleep(1 * time.Second)
+				}
 			}
-
 		}
 		<-ticker.C
 	}
 }
 
-func scrapCategory(dw *DouWorker, category DouCategory, lastTimeChecked time.Time) error {
+func scrapCategory(dw *DouWorker, category DouCategory, exp string, lastTimeChecked time.Time) error {
 	c := createCollector()
 	c.OnXML("//item", func(e *colly.XMLElement) {
 		pubDate, err := time.Parse(time.RFC1123Z, e.ChildText("//pubDate"))
@@ -80,6 +90,7 @@ func scrapCategory(dw *DouWorker, category DouCategory, lastTimeChecked time.Tim
 				name:         e.ChildText("//title"),
 				categoryId:   category.id,
 				categoryName: category.name,
+				experience:   exp,
 			}
 			fmt.Printf("Detected new vacancy: %+v\n", vac)
 			dw.newVacancyChan <- vac
@@ -87,11 +98,11 @@ func scrapCategory(dw *DouWorker, category DouCategory, lastTimeChecked time.Tim
 
 	})
 	c.OnRequest(func(r *colly.Request) {
-		dw.storage.SetLastTimeCheckedUTC(category)
-		fmt.Println("Visiting Category:", category.name)
+		dw.storage.SetLastTimeCheckedUTC(category, exp)
+		fmt.Printf("Visiting Category: %s EXP:%s\n", category.name, exp)
 	})
 
-	err := c.Visit(category.url)
+	err := c.Visit(category.url + "&exp=" + exp)
 	if err != nil {
 		return err
 	}

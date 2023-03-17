@@ -20,7 +20,7 @@ type MongoStorage struct {
 
 func CreateMongoStorage() (*MongoStorage, error) {
 	serverAPIOptions := options.ServerAPI(options.ServerAPIVersion1)
-	client, err := mongo.Connect(context.TODO(), options.Client().ApplyURI(os.Getenv("MONGO")).SetServerAPIOptions(serverAPIOptions)) //("mongodb://localhost:27017"))
+	client, err := mongo.Connect(context.TODO(), options.Client().ApplyURI(os.Getenv("MONGO")).SetServerAPIOptions(serverAPIOptions))
 	if err != nil {
 		return nil, err
 	}
@@ -33,9 +33,11 @@ func CreateMongoStorage() (*MongoStorage, error) {
 	}, nil
 }
 
-func (ms *MongoStorage) GetAllSubscribers(categoryId string) ([]SubscriptionInfo, error) {
+func (ms *MongoStorage) GetAllSubscribers(categoryName string, categoryId string, exp string) ([]SubscriptionInfo, error) {
 	coll := ms.subscriptionsCollection
-	filter := bson.D{{Key: "subscriptions.idCategory", Value: GetId(categoryId)}}
+	//filter := bson.D{{Key: "subscriptions.idCategory", Value: GetId(categoryId)}}
+	filter := bson.M{"subscriptions": bson.D{{"idCategory", GetId(categoryId)}, {"nameCategory", categoryName}, {"experience", GetId(exp)}}}
+	fmt.Println(filter)
 	res := []SubscriptionInfo{}
 	cursor, err := coll.Find(context.TODO(), filter)
 	if err != nil {
@@ -84,10 +86,10 @@ func (ms *MongoStorage) UnsubscribeUser(categoryName string, userId int) (bool, 
 	return true, nil
 }
 
-func (ms *MongoStorage) SubscribeUser(category DouCategory, userId int, chatId int64, userName string) (bool, error) {
+func (ms *MongoStorage) SubscribeUser(category DouCategory, exp string, userId int, chatId int64, userName string) (bool, error) {
 	coll := ms.subscriptionsCollection
 	filter := bson.D{{Key: "userId", Value: userId}}
-	subCategory := SubscriptionCategory{IDCategory: GetId(category.id), NameCategory: category.name}
+	subCategory := SubscriptionCategory{IDCategory: GetId(category.id), NameCategory: category.name, Experience: GetId(exp)}
 	var res SubscriptionInfo
 	coll.FindOne(context.TODO(), filter).Decode(&res)
 	res.ChatId = chatId
@@ -118,15 +120,16 @@ func (ms *MongoStorage) SubscribeUser(category DouCategory, userId int, chatId i
 	return true, nil
 }
 
-func (ms *MongoStorage) SetLastTimeCheckedUTC(category DouCategory) error {
+func (ms *MongoStorage) SetLastTimeCheckedUTC(category DouCategory, exp string) error {
 	coll := ms.categoriesCollection
 	c := &CategoryInfo{
 		IDCategory:      GetId(category.id),
 		NameCategory:    category.name,
+		Experience:      GetId(exp),
 		LastTimeChecked: time.Now().UTC().Format(time.RFC1123Z),
 	}
 
-	filter := bson.D{{Key: "idCategory", Value: c.IDCategory}}
+	filter := bson.D{{Key: "idCategory", Value: c.IDCategory}, {Key: "experience", Value: GetId(exp)}}
 	result, err := coll.ReplaceOne(context.TODO(), filter, c)
 	if err != nil {
 		fmt.Println(err)
@@ -138,21 +141,21 @@ func (ms *MongoStorage) SetLastTimeCheckedUTC(category DouCategory) error {
 		if err != nil {
 			return err
 		}
-		fmt.Printf("Added category %v with id: %v\n", category.name, res.InsertedID)
+		fmt.Printf("Added category %v exp[%s] with id: %v\n", category.name, GetId(exp), res.InsertedID)
 		return nil
 	}
 	fmt.Printf("Replaced lastTimeUsed for category `%v` matches: %v\n", category.name, result.MatchedCount)
 
 	return nil
 }
-func (ms *MongoStorage) GetLastTimeCheckedUTC(category DouCategory) time.Time {
+func (ms *MongoStorage) GetLastTimeCheckedUTC(category DouCategory, exp string) time.Time {
 	coll := ms.categoriesCollection
-	filter := bson.D{{Key: "idCategory", Value: GetId(category.id)}}
+	filter := bson.D{{Key: "idCategory", Value: GetId(category.id)}, {Key: "experience", Value: GetId(exp)}}
 
 	var doc CategoryInfo
 	result := coll.FindOne(context.TODO(), filter)
 	if err := result.Decode(&doc); err != nil {
-		fmt.Printf("Category %s:id[%s] wasn't found, so using current time\n", category.name, category.id)
+		fmt.Printf("Category %s:id[%s]:exp[%s] wasn't found, so using current time\n", category.name, category.id, GetId(exp))
 		return time.Now().UTC()
 	}
 
@@ -161,8 +164,8 @@ func (ms *MongoStorage) GetLastTimeCheckedUTC(category DouCategory) time.Time {
 		fmt.Printf("Error parsing %s to time\n", doc.LastTimeChecked)
 		return time.Now().UTC()
 	}
-
-	return tm //time.Date(2023, time.March, 9, 18, 0, 0, 0, time.Now().Location()).UTC()
+	tm.GoString()
+	return time.Date(2023, time.March, 17, 18, 0, 0, 0, time.Now().Location()).UTC() //tm //
 }
 
 func remove[T any](slice []T, s int) []T {

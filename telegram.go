@@ -22,6 +22,7 @@ type TelegramBot struct {
 type bot struct {
 	telegramBot *TelegramBot
 	chatID      int64
+	category    DouCategory
 	state       stateFn
 	messagesIds []int
 	lock        *sync.RWMutex
@@ -98,20 +99,31 @@ func (b *bot) CheckForSpam() bool {
 
 func (b *bot) selfDestruct(timech <-chan time.Time) {
 	<-timech
+	if b.lock != nil {
+		b.lock.Lock()
+		defer b.lock.Unlock()
+	}
+
 	b.RemoveMessages()
 	dsp.DelSession(b.chatID)
 }
 
 func (b *bot) Update(update *echotron.Update) {
-	go b.AddLastMessageToDeleteList(update)
+	if update == nil || update.Message == nil {
+		fmt.Println("ansync issue")
+		return
+	}
+
 	b.SendChatAction(echotron.Typing, b.chatID, nil)
 	if spam := b.CheckForSpam(); spam {
 		b.SendAutoDeleteMessage("не спамь будь ласка😉", b.chatID, parseModeHTML)
+		b.AddLastMessageToDeleteList(update)
 		b.state = b.handleMessage
 		return
 	}
 
 	b.state = b.state(update)
+	b.AddLastMessageToDeleteList(update)
 }
 
 func (b *bot) AddLastMessageToDeleteList(update *echotron.Update) {
@@ -166,7 +178,8 @@ func (b *bot) handleMySubcriptions(update *echotron.Update) stateFn {
 
 	subs := []string{}
 	for _, subCat := range subInfo.Subscriptions {
-		subs = append(subs, subCat.NameCategory)
+		s := fmt.Sprintf("%s(%s)", subCat.NameCategory, subCat.Experience)
+		subs = append(subs, s)
 	}
 
 	b.SendAutoDeleteMessage(fmt.Sprintf("✅ Ви підписані на: <b>%s</b>", strings.Join(subs, ", ")), b.chatID, parseModeHTML)
@@ -193,22 +206,19 @@ func (b *bot) handleSubscribe(update *echotron.Update) stateFn {
 	return b.handleSubscribeForCategory
 }
 
-func (b *bot) handleSubscribeForCategory(update *echotron.Update) stateFn {
+func (b *bot) handleCategoryExperience(update *echotron.Update) stateFn {
 	r := b.handleCommands(update)
 	if r != nil {
 		return r
 	}
-	res := b.handleCommands(update)
-	if res != nil {
-		return res
-	}
-	category, err := b.findCategory(update.Message.Text)
+
+	exp, err := b.findExperience(update.Message.Text)
 	if err != nil {
-		b.SendAutoDeleteMessage("🚫 Ви обрали не існуючу категорію", b.chatID, parseModeHTML)
+		b.SendAutoDeleteMessage("🚫 Ви обрали не існуючий досвід", b.chatID, parseModeHTML)
 		return b.handleMessage
 	}
 
-	ok, err := b.telegramBot.storage.SubscribeUser(category, int(update.Message.From.ID), b.chatID, update.Message.From.Username)
+	ok, err := b.telegramBot.storage.SubscribeUser(b.category, exp, int(update.Message.From.ID), b.chatID, update.Message.From.Username)
 	if err != nil {
 		fmt.Println(err)
 		b.SendAutoDeleteMessage("🚫 Не вдалося підписатися, спробуйте ще", b.chatID, parseModeHTML)
@@ -216,12 +226,47 @@ func (b *bot) handleSubscribeForCategory(update *echotron.Update) stateFn {
 	}
 
 	if !ok {
-		b.SendAutoDeleteMessage(fmt.Sprintf("‼️ Ви вже підписані на <b>%s</b>", category.name), b.chatID, parseModeHTML)
+		b.SendAutoDeleteMessage(fmt.Sprintf("‼️ Ви вже підписані на <b>%s</b>", b.category.name), b.chatID, parseModeHTML)
 		return b.handleMessage
 	}
 
-	b.SendAutoDeleteMessage(fmt.Sprintf("✅ Ви вдало підписалися на <b>%s</b>, щойно з'явиться нова вакансія - я одразу вас сповіщу👍", category.name), b.chatID, parseModeHTML)
+	b.SendAutoDeleteMessage(fmt.Sprintf("✅ Ви вдало підписалися на <b>%s(%s)</b>, щойно з'явиться нова вакансія - я одразу вас сповіщу👍", b.category.name, update.Message.Text),
+		b.chatID, parseModeHTML)
 	return b.handleMessage
+}
+
+func (b *bot) handleSubscribeForCategory(update *echotron.Update) stateFn {
+	r := b.handleCommands(update)
+	if r != nil {
+		return r
+	}
+
+	category, err := b.findCategory(update.Message.Text)
+	if err != nil {
+		b.SendAutoDeleteMessage("🚫 Ви обрали не існуючу категорію", b.chatID, parseModeHTML)
+		return b.handleMessage
+	}
+
+	b.category = category
+
+	btns := [][]echotron.KeyboardButton{}
+	i := 0
+	for k, _ := range b.telegramBot.douWorker.experienceFilters {
+		if i%3 == 0 {
+			btns = append(btns, []echotron.KeyboardButton{})
+		}
+		i++
+		btns[len(btns)-1] = append(btns[len(btns)-1], echotron.KeyboardButton{Text: k})
+	}
+
+	options := echotron.MessageOptions{
+		ReplyMarkup: echotron.ReplyKeyboardMarkup{
+			Keyboard:        btns,
+			OneTimeKeyboard: true,
+		}}
+	b.SendAutoDeleteMessage("📈 Оберіть досвід", b.chatID, &options)
+
+	return b.handleCategoryExperience
 }
 
 func (b *bot) getCurrentSubscriptionStatus(update *echotron.Update) (*SubscriptionInfo, stateFn) {
@@ -291,7 +336,17 @@ func (b *bot) findCategory(name string) (DouCategory, error) {
 			return c, nil
 		}
 	}
-	return DouCategory{}, fmt.Errorf("Category `%s` wasn't found")
+	return DouCategory{}, fmt.Errorf("Category `%s` wasn't found", name)
+}
+
+func (b *bot) findExperience(name string) (string, error) {
+	for k, v := range b.telegramBot.douWorker.experienceFilters {
+		if k == name {
+			return v, nil
+		}
+	}
+	return "", fmt.Errorf("Experience `%s` wasn't found", name)
+
 }
 
 func (b *bot) SendAutoDeleteMessage(text string, chatID int64, opts *echotron.MessageOptions) {
@@ -309,14 +364,14 @@ func (b *bot) SendAutoDeleteMessage(text string, chatID int64, opts *echotron.Me
 func pullVacancies(tb *TelegramBot) {
 	for {
 		vacancy := <-tb.douWorker.newVacancyChan
-		fmt.Printf("Received new vacancy: %+v\n", vacancy)
-		subs, err := tb.storage.GetAllSubscribers(vacancy.categoryId)
+		subs, err := tb.storage.GetAllSubscribers(vacancy.categoryName, vacancy.categoryId, vacancy.experience)
 		if err != nil {
 			fmt.Println(err)
 			continue
 		}
 
 		for _, sub := range subs {
+			fmt.Printf("Sending Vacancy to subscriber(%s): %+v\n", sub.UserName, vacancy)
 			b := newBotBroadcast(sub.ChatId).(*bot)
 			msg := fmt.Sprintf("🔥<b>Нова вакансія🔥</b>\n\n <b>Категорія</b>: <i>%s</i> 👀 \n\n➡️%s\n%s", vacancy.categoryName, vacancy.name, vacancy.url)
 			b.SendMessage(msg, sub.ChatId, parseModeHTML)
