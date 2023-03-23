@@ -35,9 +35,7 @@ func CreateMongoStorage() (*MongoStorage, error) {
 
 func (ms *MongoStorage) GetAllSubscribers(categoryName string, categoryId string, exp string) ([]SubscriptionInfo, error) {
 	coll := ms.subscriptionsCollection
-	//filter := bson.D{{Key: "subscriptions.idCategory", Value: GetId(categoryId)}}
 	filter := bson.M{"subscriptions": bson.D{{"idCategory", IdToDBId(categoryId)}, {"nameCategory", categoryName}, {"experience", IdToDBId(exp)}}}
-	fmt.Println(filter)
 	res := []SubscriptionInfo{}
 	cursor, err := coll.Find(context.TODO(), filter)
 	if err != nil {
